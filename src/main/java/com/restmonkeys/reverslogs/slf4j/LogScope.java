@@ -7,8 +7,13 @@ import java.lang.annotation.Target;
 
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
-public @interface Log {
-    String name();
-    LogLevel minLevel();
-    LogLevel fallback();
+public @interface LogScope {
+
+    String DEFAULT_LOG_NAME = "DEFAULT_LOG_NAME";
+
+    String name() default DEFAULT_LOG_NAME;
+
+    LogLevel minLevel() default LogLevel.WARN;
+
+    LogLevel fallback() default LogLevel.DEBUG;
 }

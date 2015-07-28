@@ -11,6 +11,9 @@ public enum LogLevel {
     }
 
     public int compare(LogLevel l) {
+        if (l == null) {
+            return 1;
+        }
         if (this.level == l.level) return 0;
         if (this.level > l.level) return 1;
         return -1;

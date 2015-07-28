@@ -1,24 +1,29 @@
 package com.restmonkeys.reverslogs.slf4j;
 
 import com.restmonkeys.reverslogs.slf4j.collections.LimitedSizeList;
+import com.restmonkeys.reverslogs.slf4j.collections.Pair;
 import org.slf4j.Logger;
 import org.slf4j.Marker;
 import org.slf4j.helpers.MarkerIgnoringBase;
+import org.slf4j.impl.StaticLoggerBinder;
 import org.slf4j.spi.LocationAwareLogger;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.ResourceBundle;
 import java.util.stream.Stream;
 
 public class ReversLogger extends MarkerIgnoringBase implements LocationAwareLogger {
 
-    private Logger logger;
-
-    private static final List<LogEntity> GLOBAL_LOG_CACHE = new LimitedSizeList<>();
     public static final String REVERSLOG_MINLEVEL_PROPERNY_NAME = "reverslog.minlevel";
     public static final String REVERSLOG_FALLBACKLEVEL_PROPERNY_NAME = "reverslog.fallbacklevel";
+    public static final boolean SIMPLE_MODE = "true".equalsIgnoreCase(ResourceBundle.getBundle("reverslog").getString("reverslog.simpleMode"));
+    private static final String GLOBAL_LOG_CACHE = "GLOBAL_LOG_CACHE";
+    private static final Map<String, List<LogEntity>> LOG_CACHE = new HashMap<>();
     private static final LogLevel minLevel = LogLevel.valueOf(ResourceBundle.getBundle("reverslog").getString(ReversLogger.REVERSLOG_MINLEVEL_PROPERNY_NAME));
     private static final LogLevel fallbackLevel = LogLevel.valueOf(ResourceBundle.getBundle("reverslog").getString(ReversLogger.REVERSLOG_FALLBACKLEVEL_PROPERNY_NAME));
+    private Logger logger;
 
     public ReversLogger(Logger logger) {
         this.logger = logger;
@@ -148,10 +153,20 @@ public class ReversLogger extends MarkerIgnoringBase implements LocationAwareLog
     }
 
     public void fallback(String msg, Throwable t) {
-        GLOBAL_LOG_CACHE.add(new LogEntity(LogLevel.FALLBACK, () -> logger.error(msg, t)));
-        Stream<LogEntity> logEntityStream = GLOBAL_LOG_CACHE.stream().filter((e) -> e.level.compare(fallbackLevel) <= 0);
-        logEntityStream.forEach((l) -> l.logStatement.run());
-        GLOBAL_LOG_CACHE.clear();
+        if (SIMPLE_MODE) {
+            LOG_CACHE.get(GLOBAL_LOG_CACHE).add(new LogEntity(LogLevel.FALLBACK, () -> logger.error(msg, t)));
+            Stream<LogEntity> logEntityStream = LOG_CACHE.get(GLOBAL_LOG_CACHE).stream().filter((e) -> e.level.compare(fallbackLevel) <= 0);
+            logEntityStream.forEach((l) -> l.logStatement.run());
+            LOG_CACHE.get(GLOBAL_LOG_CACHE).clear();
+        } else {
+            LogScope logScope = getLogScope(t.getStackTrace());
+            LOG_CACHE.get(logScope != null ? logScope.name() : GLOBAL_LOG_CACHE)
+                    .stream()
+                    .filter((e) -> e.level.compare(logScope != null ? logScope.fallback() : fallbackLevel) <= 0)
+                    .forEach((l) -> l.logStatement.run());
+            LOG_CACHE.get(logScope != null ? logScope.name() : GLOBAL_LOG_CACHE).clear();
+
+        }
     }
 
     public void log(Marker marker, String fqcn, int level, String message, Object[] argArray, Throwable t) {
@@ -175,11 +190,38 @@ public class ReversLogger extends MarkerIgnoringBase implements LocationAwareLog
     }
 
     private void log(LogLevel l, Runnable r) {
-        if (predicate(l).test()) {
-            r.run();
+        StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
+        LogScope logScope = getLogScope(stackTrace);
+        if (SIMPLE_MODE || (logScope == null)) {
+            if (predicate(l).test()) {
+                r.run();
+            } else {
+                putToCache(GLOBAL_LOG_CACHE, l, r);
+            }
         } else {
-            GLOBAL_LOG_CACHE.add(new LogEntity(l, r));
+            if (l.compare(logScope.minLevel()) >= 0) {
+                r.run();
+            } else {
+                putToCache(logScope.name(), l, r);
+            }
         }
+    }
+
+    private void putToCache(String name, LogLevel l, Runnable r) {
+        if (!LOG_CACHE.containsKey(name)) {
+            LOG_CACHE.put(name, new LimitedSizeList<>());
+        }
+        LOG_CACHE.get(name).add(new LogEntity(l, r));
+    }
+
+    private LogScope getLogScope(StackTraceElement[] stackTrace) {
+        for (StackTraceElement stackTraceElement : stackTrace) {
+            Pair<String, Integer> pair = new Pair<>(stackTraceElement.getMethodName(), stackTraceElement.getLineNumber());
+            if (StaticLoggerBinder.logScopes.containsKey(pair)) {
+                return StaticLoggerBinder.logScopes.get(pair);
+            }
+        }
+        return null;
     }
 
     public static class LogEntity {
