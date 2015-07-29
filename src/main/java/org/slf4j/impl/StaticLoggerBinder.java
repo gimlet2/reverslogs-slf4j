@@ -13,7 +13,6 @@ import org.reflections.scanners.MethodAnnotationsScanner;
 import org.reflections.util.ConfigurationBuilder;
 import org.slf4j.ILoggerFactory;
 import org.slf4j.spi.LoggerFactoryBinder;
-import sun.rmi.runtime.Log;
 
 import java.lang.reflect.Method;
 import java.util.HashMap;
@@ -52,7 +51,7 @@ public class StaticLoggerBinder implements LoggerFactoryBinder {
                 cc = pool.get(method.getDeclaringClass().getCanonicalName());
                 CtMethod[] declaredMethods = cc.getDeclaredMethods();
                 for (CtMethod declaredMethod : declaredMethods) {
-                    if (declaredMethod.hasAnnotation(Log.class)) {
+                    if (declaredMethod.hasAnnotation(LogScope.class)) {
                         LogScope annotation = (LogScope) declaredMethod.getAnnotation(LogScope.class);
                         int lineNumber = declaredMethod.getMethodInfo().getLineNumber(0);
                         logScopes.put(new Pair<>(method.getName(), lineNumber), annotation);
